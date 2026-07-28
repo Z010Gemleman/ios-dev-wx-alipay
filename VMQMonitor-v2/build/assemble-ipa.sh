@@ -114,7 +114,12 @@ log "fakesign App 与 helper"
 # ---- 7. 打包 IPA + SHA-256 ----
 log "打包 $IPA_NAME"
 ( cd "$STAGE_DIR" && zip -qr "$OUT_DIR/$IPA_NAME" Payload )
-( cd "$OUT_DIR" && sha256sum "$IPA_NAME" > "$IPA_NAME.sha256" )
+# sha256：Linux 用 sha256sum，macOS 用 shasum -a 256（CI 跑在 macOS runner 上）
+if command -v sha256sum >/dev/null 2>&1; then
+    ( cd "$OUT_DIR" && sha256sum "$IPA_NAME" > "$IPA_NAME.sha256" )
+else
+    ( cd "$OUT_DIR" && shasum -a 256 "$IPA_NAME" > "$IPA_NAME.sha256" )
+fi
 
 log "完成"
 echo "  IPA:    $OUT_DIR/$IPA_NAME"
