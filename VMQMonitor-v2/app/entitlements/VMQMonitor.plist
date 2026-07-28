@@ -11,5 +11,9 @@
 	<!-- 允许 spawn 子进程（helper）。 -->
 	<key>com.apple.private.security.storage.AppDataContainers</key>
 	<true/>
+	<!-- 关键：允许 App 以 root persona 拉起 helper（posix_spawnattr_set_persona_np）。 -->
+	<!-- 缺此权限则 helper 仍以 mobile 运行，dpkg 写系统路径权限不足 → "无法启动监听"。 -->
+	<key>com.apple.private.persona-mgmt</key>
+	<true/>
 </dict>
 </plist>

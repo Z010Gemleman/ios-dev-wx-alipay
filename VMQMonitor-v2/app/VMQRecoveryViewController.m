@@ -11,8 +11,17 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <errno.h>
-#include <crt_externs.h>   // _NSGetEnviron()
 #include <crt_externs.h>   // _NSGetEnviron()（iOS 上取 environ 的官方方式）
+
+// ---- persona SPI（TrollStore root-spawn 机制）----
+// TrollStore App（mobile 身份）需以 root 拉起 helper 才能 dpkg -i 写系统路径。
+// 通过 posix_spawnattr 设置 persona = root（uid/gid 0），配合 App 的
+// com.apple.private.persona-mgmt entitlement 生效。
+#define VMQ_PERSONA_FLAGS_OVERRIDE 1
+typedef uint32_t vmq_persona_id_t;
+int posix_spawnattr_set_persona_np(posix_spawnattr_t *__restrict, vmq_persona_id_t, uint32_t);
+int posix_spawnattr_set_persona_uid_np(posix_spawnattr_t *__restrict, uid_t);
+int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *__restrict, gid_t);
 
 @interface VMQRecoveryViewController ()
 @property (nonatomic, strong) UILabel          *statusLabel;
@@ -27,30 +36,35 @@
 
 #pragma mark - 越狱环境检测
 
-// 检测越狱 scheme：优先 JBROOT 环境变量（RootHide），其次 /var/jb 目录（rootless）。
+// 检测越狱 scheme。
+// 关键：TrollStore App 内 getenv("JBROOT") 通常为空，不能作唯一依据。
+// 真正的区分特征是 /var/jb 本身的类型：
+//   - RootHide：/var/jb 是符号链接（-> 随机 jbroot / 根），lstat 得到 S_ISLNK
+//   - 标准 rootless(Dopamine/Ellekit)：/var/jb 是真实目录，lstat 得到 S_ISDIR
 - (NSString *)detectedScheme {
     const char *jbroot = getenv("JBROOT");
     if (jbroot && strlen(jbroot) > 0) return @"roothide";
-    struct stat st;
-    if (stat("/var/jb", &st) == 0 && S_ISDIR(st.st_mode)) return @"rootless";
+    struct stat lst;
+    if (lstat("/var/jb", &lst) == 0) {
+        if (S_ISLNK(lst.st_mode)) return @"roothide";   // /var/jb -> / 是 RootHide 特征
+        if (S_ISDIR(lst.st_mode)) return @"rootless";
+    }
     return nil;
 }
 
 // 监听组件 dylib 是否已安装到 bootstrap。
+// /var/jb 在两种方案下都能正确解析到 bootstrap 根：
+//   roothide: /var/jb -> /（符号链接）→ /var/jb/Library/... 即 /Library/...
+//   rootless: /var/jb 是真实目录
+// 故统一用 /var/jb 前缀探测，无需依赖 JBROOT 环境变量。
 - (BOOL)isListenerInstalled {
-    NSString *scheme = [self detectedScheme];
-    NSString *base = nil;
-    if ([scheme isEqualToString:@"roothide"]) {
-        const char *jr = getenv("JBROOT");
-        base = jr ? @(jr) : nil;
-    } else if ([scheme isEqualToString:@"rootless"]) {
-        base = @"/var/jb";
-    }
-    if (!base) return NO;
-    NSString *path = [base stringByAppendingString:
-                      @"/Library/MobileSubstrate/DynamicLibraries/VMQListener.dylib"];
     struct stat st;
-    return stat(path.fileSystemRepresentation, &st) == 0;
+    if (stat("/var/jb/Library/MobileSubstrate/DynamicLibraries/VMQListener.dylib", &st) == 0)
+        return YES;
+    // 兜底：直接根路径（roothide 下 /var/jb 已等价于 /，此项冗余但无害）
+    if (stat("/Library/MobileSubstrate/DynamicLibraries/VMQListener.dylib", &st) == 0)
+        return YES;
+    return NO;
 }
 
 #pragma mark - Helper 调用（posix_spawn + 管道捕获 stdout）
@@ -87,9 +101,18 @@
     posix_spawn_file_actions_adddup2(&fa, pfd[1], STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&fa, pfd[1]);
 
+    // 关键：设置 persona = root，让 helper 以 root 运行（否则 dpkg 写系统路径权限不足）。
+    // 这是 TrollStore App 提权 spawn 的标准做法（persona 99 = root）。
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_set_persona_np(&attr, 99, VMQ_PERSONA_FLAGS_OVERRIDE);
+    posix_spawnattr_set_persona_uid_np(&attr, 0);
+    posix_spawnattr_set_persona_gid_np(&attr, 0);
+
     pid_t pid = 0;
-    int rc = posix_spawn(&pid, helperPath.UTF8String, &fa, NULL,
+    int rc = posix_spawn(&pid, helperPath.UTF8String, &fa, &attr,
                          (char *const *)argv, *_NSGetEnviron());
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     free(argv);
     close(pfd[1]);
