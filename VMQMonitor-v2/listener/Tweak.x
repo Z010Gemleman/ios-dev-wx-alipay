@@ -14,13 +14,20 @@
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
+#include <os/log.h>
 
 #import "../common/VMQProtocol.h"
 #import "VMQDatagramClient.h"
 
-// ---- 极简 trace（只用 open/write，不依赖 Foundation，不阻塞）----
+// ---- trace：双通道（os_log + 文件）----
+// SpringBoard 沙盒会静默阻止写 /var/mobile/...，导致文件 trace 不可见。
+// os_log 走统一日志，沙盒无法拦截，是加载/hook 是否生效的权威信号。
+// 查看：log show --last 5m --predicate 'eventMessage CONTAINS "[VMQ]"'
 static void trace(const char *step) {
-    // 确保目录存在（第一次调用时，开销仅 mkdir，后续 noop）
+    // 权威通道：统一日志（沙盒不可拦截）
+    os_log(OS_LOG_DEFAULT, "[VMQ] %{public}s pid=%d", step, (int)getpid());
+
+    // 兼容通道：文件（若沙盒允许则可读，否则静默失败，无害）
     mkdir(VMQ_DATA_DIR, 0755);
     mkdir(VMQ_DIAG_DIR, 0777);
     chmod(VMQ_DIAG_DIR, 0777);
