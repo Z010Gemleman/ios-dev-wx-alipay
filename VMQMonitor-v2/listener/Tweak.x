@@ -19,25 +19,32 @@
 #import "../common/VMQProtocol.h"
 #import "VMQDatagramClient.h"
 
-// ---- trace：双通道（os_log + 文件）----
-// SpringBoard 沙盒会静默阻止写 /var/mobile/...，导致文件 trace 不可见。
-// os_log 走统一日志，沙盒无法拦截，是加载/hook 是否生效的权威信号。
-// 查看：log show --last 5m --predicate 'eventMessage CONTAINS "[VMQ]"'
+// ---- trace：三通道，确保至少一条可见 ----
+// 设备无 /usr/bin/log（os_log 读不到），且 SpringBoard 沙盒疑似阻止写
+// /var/mobile/Library/Application Support/...。而 Preferences 目录 SpringBoard
+// 自己一直在写（大量 .plist），是沙盒白名单内、SSH 可读的可靠通道。
+// 权威通道 = Preferences 文件：/var/mobile/Library/Preferences/vmqtrace.log
+#define VMQ_PREF_TRACE "/var/mobile/Library/Preferences/vmqtrace.log"
 static void trace(const char *step) {
-    // 权威通道：统一日志（沙盒不可拦截）
-    os_log(OS_LOG_DEFAULT, "[VMQ] %{public}s pid=%d", step, (int)getpid());
-
-    // 兼容通道：文件（若沙盒允许则可读，否则静默失败，无害）
-    mkdir(VMQ_DATA_DIR, 0755);
-    mkdir(VMQ_DIAG_DIR, 0777);
-    chmod(VMQ_DIAG_DIR, 0777);
-
-    int fd = open(VMQ_BOOT_TRACE, O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (fd < 0) return;
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "%ld Tweak %d %s\n",
                      (long)time(NULL), (int)getpid(), step);
-    (void)write(fd, buf, (n > 0 ? (size_t)n : 0));
+    size_t len = (n > 0 ? (size_t)n : 0);
+
+    // 通道1（权威）：Preferences 目录，SpringBoard 沙盒允许，SSH 可读
+    int pf = open(VMQ_PREF_TRACE, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (pf >= 0) { (void)write(pf, buf, len); close(pf); }
+
+    // 通道2：统一日志（若设备有 log 工具可读）
+    os_log(OS_LOG_DEFAULT, "[VMQ] %{public}s pid=%d", step, (int)getpid());
+
+    // 通道3（兼容）：原数据目录（沙盒允许则可读，否则静默失败）
+    mkdir(VMQ_DATA_DIR, 0755);
+    mkdir(VMQ_DIAG_DIR, 0777);
+    chmod(VMQ_DIAG_DIR, 0777);
+    int fd = open(VMQ_BOOT_TRACE, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd < 0) return;
+    (void)write(fd, buf, len);
     close(fd);
 }
 
