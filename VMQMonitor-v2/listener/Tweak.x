@@ -19,6 +19,9 @@
 #import "../common/VMQProtocol.h"
 #import "VMQDatagramClient.h"
 
+// 前置声明：CFPreferences 信标（定义在 %ctor 之前、hook 之后引用，需前置声明）
+static void vmq_beacon(const char *key);
+
 // ---- trace：三通道，确保至少一条可见 ----
 // 设备无 /usr/bin/log（os_log 读不到），且 SpringBoard 沙盒疑似阻止写
 // /var/mobile/Library/Application Support/...。而 Preferences 目录 SpringBoard
