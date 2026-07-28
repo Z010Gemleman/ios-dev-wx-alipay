@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- vmqmond 后台守护进程 entitlements。
+     仅申请越狱环境下守护进程正常运行所需的最小权限。
+     严禁申请 iOS 15 A12+ 禁止的 dynamic-codesigning / cs.debugger /
+     skip-library-validation（设计文档 §11.1）。 -->
+<plist version="1.0">
+<dict>
+	<key>platform-application</key>
+	<true/>
+	<key>com.apple.private.security.no-container</key>
+	<true/>
+</dict>
+</plist>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.z010genleman.vmqmonitor.v2.vmqmond</string>
+    <key>ProgramArguments</key>
+    <array>
+        <!-- 路径前缀由打包方案(rootless: /var/jb, roothide: 随机 jbroot)在安装时处理 -->
+        <string>/usr/libexec/vmqmond</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>StandardErrorPath</key>
+    <string>/var/mobile/Library/Application Support/VMQMonitorV2/vmqmond.stderr.log</string>
+</dict>
+</plist>

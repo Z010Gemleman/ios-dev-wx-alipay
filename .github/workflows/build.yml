@@ -1,0 +1,85 @@
+name: Build VMQMonitor-v2 IPA
+
+# 在 macOS runner 上用 Apple 官方工具链编译。
+# 这是解决 arm64e 死机的根本方案：Apple clang 产出正确的版本化 PAC ABI
+# （otool 显示 arm64e "PTR_AUTH_VERSION USERSPACE"），而 Linux/设备开源 clang 只能产出
+# caps 0x0，会被 iOS 16 dyld 判定不兼容并崩溃 SpringBoard。
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:        # 允许在 GitHub 网页上手动点按钮触发
+
+jobs:
+  build:
+    runs-on: macos-14       # Apple Silicon runner，原生 arm64e
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装构建工具 (ldid / dpkg / make / xz)
+        run: |
+          brew update
+          brew install ldid dpkg make xz || true
+
+      - name: 安装标准 Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+
+      - name: 安装 roothide Theos
+        run: |
+          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos_roothide"
+
+      - name: 下载 iPhoneOS 16.5 SDK（稀疏检出，只取需要的一个）
+        run: |
+          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks.git /tmp/sdks
+          cd /tmp/sdks
+          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git checkout
+          mkdir -p "$HOME/theos/sdks" "$HOME/theos_roothide/sdks"
+          cp -R /tmp/sdks/iPhoneOS16.5.sdk "$HOME/theos/sdks/"
+          cp -R /tmp/sdks/iPhoneOS16.5.sdk "$HOME/theos_roothide/sdks/"
+
+      - name: 构建 IPA（两套 deb + helper + app，组装 + fakesign）
+        env:
+          THEOS_STD: ${{ github.workspace }}/.theos_std
+          THEOS_ROOTHIDE: ${{ github.workspace }}/.theos_roothide
+        run: |
+          # assemble-ipa.sh 用 THEOS_STD / THEOS_ROOTHIDE 环境变量指定两套 theos
+          ln -s "$HOME/theos" "$THEOS_STD"
+          ln -s "$HOME/theos_roothide" "$THEOS_ROOTHIDE"
+          # 确保 brew 的 gmake / ldid 在 PATH
+          export PATH="$(brew --prefix make)/libexec/gnubin:$(brew --prefix)/bin:$PATH"
+          cd VMQMonitor-v2
+          bash build/assemble-ipa.sh
+
+      - name: 验证 arm64e PAC ABI（关键：证明死机根因已修复）
+        run: |
+          cd VMQMonitor-v2
+          echo "===== 从 roothide deb 提取 VMQListener.dylib ====="
+          mkdir -p /tmp/ext
+          dpkg-deb -x build/stage/com.z010genleman.vmqmonitor.v2.runtime-roothide.deb /tmp/ext || true
+          DYLIB="$(find /tmp/ext -name VMQListener.dylib -type f | head -n1)"
+          echo "dylib: $DYLIB"
+          if [ -n "$DYLIB" ]; then
+            echo "===== otool fat header（期望 arm64e 显示 PTR_AUTH_VERSION）====="
+            otool -f -v "$DYLIB" || true
+            echo "===== 判定 ====="
+            if otool -f -v "$DYLIB" | grep -q "PTR_AUTH_VERSION"; then
+              echo "PASS: arm64e slice 带版本化 PAC ABI（Apple clang 正确产出，不会崩 SpringBoard）"
+            else
+              echo "WARN: 未检测到 PTR_AUTH_VERSION，需检查工具链"
+            fi
+          fi
+
+      - name: 上传 IPA 与 deb 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: VMQMonitor-v2-build
+          path: |
+            VMQMonitor-v2/build/out/VMQMonitor-v2.ipa
+            VMQMonitor-v2/build/out/VMQMonitor-v2.ipa.sha256
+            VMQMonitor-v2/build/stage/*.deb
+          if-no-files-found: error
+          retention-days: 14

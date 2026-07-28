@@ -1,0 +1,19 @@
+# Theos 构建产物
+**/.theos/
+**/packages/
+VMQMonitor-v2/build/out/
+VMQMonitor-v2/build/stage/
+
+# 编译中间产物
+*.o
+*.Td
+*.dylib
+*.deb
+
+# 令牌/密钥（绝不提交）
+*.token
+*.pat
+.env
+
+# 系统
+.DS_Store

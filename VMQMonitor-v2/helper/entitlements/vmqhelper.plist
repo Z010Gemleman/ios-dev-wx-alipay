@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Root Helper 权限（设计文档 §17）。
+         TrollStore 保留的授权允许该 helper 以 root 身份执行受控安装/卸载。
+         这些 entitlement 仅用于 dpkg/sbreload 等受控动作，不申请调试或跳过库校验。 -->
+    <key>platform-application</key>
+    <true/>
+    <key>com.apple.private.security.no-sandbox</key>
+    <true/>
+    <!-- 允许以 root 身份运行子进程（dpkg / sbreload）。 -->
+    <key>com.apple.private.persona-mgmt</key>
+    <true/>
+</dict>
+</plist>

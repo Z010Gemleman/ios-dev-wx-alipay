@@ -1,0 +1,9 @@
+Package: com.z010genleman.vmqmonitor.v2.runtime
+Name: VMQ Monitor V2 Runtime
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: VMQ Monitor V2 runtime payload: notification listener + vmqmond daemon.
+Maintainer: z010genleman
+Author: z010genleman
+Section: System
+Depends: org.coolstar.ellekit | mobilesubstrate
