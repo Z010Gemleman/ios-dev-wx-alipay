@@ -104,15 +104,32 @@ static void observe_bulletin(id bulletin) {
 - (void)publishBulletin:(id)bulletin destinations:(unsigned long long)destinations {
     %orig;
     if (!g_armed) return;
-    if (!g_first_cb) { g_first_cb = 1; trace("hook:first_callback"); }
+    if (!g_first_cb) { g_first_cb = 1; vmq_beacon("hook_first_cb"); trace("hook:first_callback"); }
     observe_bulletin(bulletin);
 }
 %end
 %end
 
+// CFPreferences 信标：经 cfprefsd 持久化（SpringBoard 自己就这样写 Preferences），
+// 沙盒放行，比 raw open() 可靠。SSH 侧读：
+//   plutil -p /var/mobile/Library/Preferences/com.z010genleman.vmqmonitor.v2.beacon.plist
+// 或 defaults read com.z010genleman.vmqmonitor.v2.beacon
+static void vmq_beacon(const char *key) {
+    CFStringRef k = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
+    if (!k) return;
+    CFStringRef appID = CFSTR("com.z010genleman.vmqmonitor.v2.beacon");
+    CFDateRef now = CFDateCreate(NULL, CFAbsoluteTimeGetCurrent());
+    CFPreferencesSetValue(k, now ? (CFPropertyListRef)now : (CFPropertyListRef)kCFBooleanTrue,
+                          appID, kCFPreferencesAnyUser, kCFPreferencesAnyHost);
+    CFPreferencesSynchronize(appID, kCFPreferencesAnyUser, kCFPreferencesAnyHost);
+    if (now) CFRelease(now);
+    CFRelease(k);
+}
+
 // ---- %ctor：必须在毫秒级完成 ----
 %ctor {
     @autoreleasepool {
+        vmq_beacon("ctor_enter");   // 沙盒放行的加载信标（第一优先）
         trace("ctor:enter");
 
         // 1. 固定禁用标记
