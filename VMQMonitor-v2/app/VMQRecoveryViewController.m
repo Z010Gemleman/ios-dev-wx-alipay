@@ -37,17 +37,27 @@ int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *__restrict, gid_t);
 #pragma mark - 越狱环境检测
 
 // 检测越狱 scheme。
-// 关键：TrollStore App 内 getenv("JBROOT") 通常为空，不能作唯一依据。
-// 真正的区分特征是 /var/jb 本身的类型：
-//   - RootHide：/var/jb 是符号链接（-> 随机 jbroot / 根），lstat 得到 S_ISLNK
-//   - 标准 rootless(Dopamine/Ellekit)：/var/jb 是真实目录，lstat 得到 S_ISDIR
+// TrollStore 沙盒会拦截 /var/jb 的 lstat，所以加多条备用检测路径。
+// 最可靠的备用：/Library/MobileSubstrate/DynamicLibraries/.jbroot（RootHide 特有符号链接）
+// 以及 /Library/Frameworks/CydiaSubstrate.framework（越狱激活时存在）。
 - (NSString *)detectedScheme {
     const char *jbroot = getenv("JBROOT");
     if (jbroot && strlen(jbroot) > 0) return @"roothide";
+
     struct stat lst;
+    // 1. /var/jb lstat（有时沙盒允许，有时不允许）
     if (lstat("/var/jb", &lst) == 0) {
-        if (S_ISLNK(lst.st_mode)) return @"roothide";   // /var/jb -> / 是 RootHide 特征
+        if (S_ISLNK(lst.st_mode)) return @"roothide";
         if (S_ISDIR(lst.st_mode)) return @"rootless";
+    }
+    // 2. DynamicLibraries/.jbroot — RootHide 独有符号链接，TrollStore 可访问
+    if (lstat("/Library/MobileSubstrate/DynamicLibraries/.jbroot", &lst) == 0
+        && S_ISLNK(lst.st_mode)) {
+        return @"roothide";
+    }
+    // 3. CydiaSubstrate.framework 存在 = 越狱激活，默认 roothide（Dopamine+RootHide）
+    if (access("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", F_OK) == 0) {
+        return @"roothide";
     }
     return nil;
 }
