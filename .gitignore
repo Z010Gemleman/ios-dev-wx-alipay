@@ -3,6 +3,7 @@
 **/packages/
 VMQMonitor-v2/build/out/
 VMQMonitor-v2/build/stage/
+build/ci-download/
 
 # 编译中间产物
 *.o
