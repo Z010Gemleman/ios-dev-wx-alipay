@@ -114,13 +114,25 @@ static int runProcess(const char *path, char *const argv[]) {
 
 // ---- 命令实现 ----
 static int cmdInstall(NSString *scheme) {
-    // 找到对应 scheme 的清单条目
+    // 关键发现（2026-07-29 真机调试）：
+    // 此设备所有能被 ellekit 加载的 tweak 都是「rootless 格式」——
+    // 使用 @rpath/CydiaSubstrate.framework + @loader_path/.jbroot/Library/Frameworks LC_RPATH，
+    // 通过 RootHidePatcher 或 Sileo 安装，自动生成 .roothidepatch 标记。
+    // roothide-scheme deb（baked @loader_path/.jbroot 路径）被 ellekit 静默跳过。
+    //
+    // 正确做法：
+    //   1. 强制安装 rootless deb（架构标注 iphoneos-arm64，用 --force-architecture 绕过）
+    //   2. 安装后手动创建 .roothidepatch 符号链接（指向 AutoPatches.dylib）
+    //   3. sbreload → ellekit 按正确路径加载 dylib
+    (void)scheme; // scheme 参数保留供卸载/诊断用；安装始终走 rootless 路径
+
+    // 找 rootless deb
     NSUInteger idx = NSNotFound;
     for (NSUInteger i = 0; i < kPayloadCount; i++) {
-        if (strcmp(kEmbeddedPayloads[i].scheme, scheme.UTF8String) == 0) { idx = i; break; }
+        if (strcmp(kEmbeddedPayloads[i].scheme, "rootless") == 0) { idx = i; break; }
     }
     if (idx == NSNotFound) {
-        reply(NO, [NSString stringWithFormat:@"未知 scheme: %@", scheme]);
+        reply(NO, @"找不到 rootless 载荷");
         return 1;
     }
 
@@ -131,7 +143,7 @@ static int cmdInstall(NSString *scheme) {
         return 1;
     }
 
-    // SHA-256 校验
+    // SHA-256 校验（开发阶段留空，跳过）
     const char *expected = kEmbeddedPayloads[idx].expectedSHA256;
     if (expected && strlen(expected) == 64) {
         NSString *actual = sha256OfFile(debPath);
@@ -140,14 +152,23 @@ static int cmdInstall(NSString *scheme) {
             return 1;
         }
     }
-    // dpkg 路径：JBROOT env → /var/jb → /opt/procursus → 报错
+
     const char *dpkgPath = vmq_find_tool("dpkg");
     if (!dpkgPath) {
         reply(NO, @"找不到 dpkg（确认越狱处于激活状态）");
         return 1;
     }
-    char *const dpkgArgv[] = { (char *)"dpkg", (char *)"-i",
-                               (char *)debPath.fileSystemRepresentation, NULL };
+
+    // --force-architecture：rootless deb 标注 iphoneos-arm64，
+    // 系统为 iphoneos-arm64e，需强制跳过架构检查。
+    // deb 内含 fat dylib（arm64+arm64e），arm64e slice PAC ABI 正确。
+    char *const dpkgArgv[] = {
+        (char *)"dpkg",
+        (char *)"--force-architecture",
+        (char *)"-i",
+        (char *)debPath.fileSystemRepresentation,
+        NULL
+    };
     int code = runProcess(dpkgPath, dpkgArgv);
     if (code < 0) {
         reply(NO, [NSString stringWithFormat:@"dpkg 启动失败: %s", strerror(errno)]);
@@ -158,14 +179,29 @@ static int cmdInstall(NSString *scheme) {
         return 1;
     }
 
-    // Respring（sbreload）
+    // 安装后创建 .roothidepatch 符号链接。
+    // 所有能被 ellekit 加载的 RootHide tweak 都有此标记，指向 AutoPatches.dylib。
+    // dpkg 直装不会自动创建（只有 Sileo/RootHidePatcher 的钩子会），故手动补建。
+    NSString *dylib  = @"/Library/MobileSubstrate/DynamicLibraries/VMQListener.dylib";
+    NSString *patch  = [dylib stringByAppendingString:@".roothidepatch"];
+    NSString *target = @"/usr/lib/DynamicPatches/AutoPatches.dylib";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm removeItemAtPath:patch error:nil]; // 先删旧的（如有）
+    NSError *lnErr = nil;
+    [fm createSymbolicLinkAtPath:patch withDestinationPath:target error:&lnErr];
+    if (lnErr) {
+        // 非致命——sbreload 后如果没加载到位，下次可重试
+        NSLog(@"[VMQ] .roothidepatch 创建失败: %@（非致命）", lnErr.localizedDescription);
+    }
+
+    // Respring
     const char *sbreloadPath = vmq_find_tool("sbreload");
     if (sbreloadPath) {
         char *const sbArgv[] = { (char *)"sbreload", NULL };
         runProcess(sbreloadPath, sbArgv);
     }
 
-    reply(YES, @"安装完成，请等待设备刷新");
+    reply(YES, @"安装完成，设备即将刷新");
     return 0;
 }
 
